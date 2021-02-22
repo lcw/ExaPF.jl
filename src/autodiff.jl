@@ -230,9 +230,9 @@ Extract the partials from the AutoDiff dual type on the CPU and put it in the
 compressed Jacobian
 
 """
-@kernel function getpartials_kernel_cpu!(compressedJ, t1sF)
+@kernel function getpartials_kernel_cpu!(compressedJ, partials)
     i = @index(Global, Linear)
-    compressedJ[:, i] .= ForwardDiff.partials.(t1sF[i]).values
+    compressedJ[:, i] .= partials[i].values
 end
 
 """
@@ -242,10 +242,11 @@ Extract the partials from the AutoDiff dual type on the GPU and put it in the
 compressed Jacobian
 
 """
-@kernel function getpartials_kernel_gpu!(compressedJ, t1sF)
+@kernel function getpartials_kernel_gpu!(compressedJ, partials)
     i = @index(Global, Linear)
-    for j in eachindex(ForwardDiff.partials.(t1sF[i]).values)
-        @inbounds compressedJ[j, i] = ForwardDiff.partials.(t1sF[i]).values[j]
+    k = length(partials[i].values)
+    @inbounds for j in 1:k
+        @inbounds compressedJ[j, i] = partials[i].values[j]
     end
 end
 
@@ -255,13 +256,19 @@ end
 Calling the partial extraction kernel
 
 """
-function getpartials_kernel!(compressedJ, t1sF, nbus)
+function getpartials_kernel!(compressedJ, t1sF)
     if isa(compressedJ, Array)
         kernel! = getpartials_kernel_cpu!(CPU())
     else
         kernel! = getpartials_kernel_gpu!(CUDADevice())
     end
-    ev = kernel!(compressedJ, t1sF, ndrange=length(t1sF))
+    @show length(t1sF)
+    @show size(compressedJ)
+    @show size(ForwardDiff.partials.(t1sF))
+    @show typeof(ForwardDiff.partials.(t1sF))
+    partials = ForwardDiff.partials.(t1sF)
+    @show length(partials[1].values)
+    ev = kernel!(compressedJ, partials, ndrange=length(t1sF))
     wait(ev)
 end
 
@@ -332,12 +339,12 @@ function residual_jacobian!(J::Jacobian,
         J.x[1:nvbus] .= vm
         J.x[nvbus+1:2*nvbus] .= va
         J.t1sx .= J.x
-        J.t1sF .= 0.0
+        J.t1sF .= zero(eltype(J.t1sF))
     elseif isa(type, ControlJacobian)
         J.x[1:nvbus] .= vm
         J.x[nvbus+1:nvbus+ninj] .= pinj
         J.t1sx .= J.x
-        J.t1sF .= 0.0
+        J.t1sF .= zero(eltype(J.t1sF))
     else
         error("Unsupported Jacobian structure")
     end
@@ -365,8 +372,10 @@ function residual_jacobian!(J::Jacobian,
     else
         error("Unsupported Jacobian structure")
     end
-
-    getpartials_kernel!(J.compressedJ, J.t1sF, nbus)
+    # J.compressedJ .= 0.0
+    println("partials: ", sum(sum.(ForwardDiff.partials.(J.t1sF))))
+    getpartials_kernel!(J.compressedJ, J.t1sF)
+    println("compressedJ: ", sum(J.compressedJ))
     uncompress_kernel!(J.J, J.compressedJ, J.coloring)
 
     return nothing

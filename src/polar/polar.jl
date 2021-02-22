@@ -346,7 +346,7 @@ function powerflow(
     )
 
     # check for convergence
-    normF = norm(F, Inf)
+    normF = xnorm(F)
     if algo.verbose >= VERBOSE_LEVEL_LOW
         @printf("Iteration %d. Residual norm: %g.\n", iter, normF)
     end
@@ -362,6 +362,8 @@ function powerflow(
     dx34 = view(dx, j3:j4) # Vapq
     dx56 = view(dx, j1:j2) # Vapv
 
+    println("norm(J): ", xnorm(jacobian.J.nzVal))
+    println("norm(F): $normF, norm(Vm): ", xnorm(Vm), " norm(Va): ", xnorm(Va))
     @timeit TIMER "Newton" while ((!converged) && (iter < algo.maxiter))
 
         iter += 1
@@ -372,6 +374,7 @@ function powerflow(
                                    ybus_re, ybus_im, pbus, qbus, pv, pq, ref, nbus, AutoDiff.StateJacobian())
         end
         J = jacobian.J
+        println("$iter norm(J): ", xnorm(jacobian.J.nzVal))
 
         # Find descent direction
         if isa(solver, LinearSolvers.AbstractIterativeLinearSolver)
@@ -394,6 +397,7 @@ function powerflow(
                 Vapq .= Vapq .- dx34
             end
         end
+        println("$iter norm(F): $normF, norm(Vm): ", xnorm(Vm), " norm(Va): ", xnorm(Va))
 
         fill!(F, zero(T))
         @timeit TIMER "Residual function" begin

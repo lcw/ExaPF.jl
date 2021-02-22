@@ -62,7 +62,34 @@ function get_react_injection(fr::Int, v_m, v_a, ybus_re::Spmat{VI,VT}, ybus_im::
     return Q
 end
 
-KA.@kernel function residual_kernel!(F, v_m, v_a,
+KA.@kernel function residual_kernel1!(F, v_m, v_a,
+                                  ybus_re_nzval, ybus_re_colptr, ybus_re_rowval,
+                                  ybus_im_nzval, ybus_im_colptr, ybus_im_rowval,
+                                  pinj, qinj, pv, pq, nbus)
+
+    npv = size(pv, 1)
+    npq = size(pq, 1)
+    i = @index(Global, Linear)
+    F[i] = 0.0
+    # REAL PV: 1:npv
+    # REAL PQ: (npv+1:npv+npq)
+    # IMAG PQ: (npv+npq+1:npv+2npq)
+    fr = (i <= npv) ? pv[i] : pq[i - npv]
+    F[i] -= pinj[fr]
+    @inbounds for c in ybus_re_colptr[fr]:ybus_re_colptr[fr+1]-1
+        to = ybus_re_rowval[c]
+        aij = v_a[fr] - v_a[to]
+        # f_re = a * cos + b * sin
+        # f_im = a * sin - b * cos
+        coef_cos = v_m[fr]*v_m[to]*ybus_re_nzval[c]
+        coef_sin = v_m[fr]*v_m[to]*ybus_im_nzval[c]
+        cos_val = cos(aij)
+        sin_val = sin(aij)
+        F[i] += coef_cos * cos_val + coef_sin * sin_val
+    end
+end
+
+KA.@kernel function residual_kernel2!(F, v_m, v_a,
                                   ybus_re_nzval, ybus_re_colptr, ybus_re_rowval,
                                   ybus_im_nzval, ybus_im_colptr, ybus_im_rowval,
                                   pinj, qinj, pv, pq, nbus)
@@ -75,7 +102,6 @@ KA.@kernel function residual_kernel!(F, v_m, v_a,
     # REAL PQ: (npv+1:npv+npq)
     # IMAG PQ: (npv+npq+1:npv+2npq)
     fr = (i <= npv) ? pv[i] : pq[i - npv]
-    F[i] -= pinj[fr]
     if i > npv
         F[i + npq] -= qinj[fr]
     end
@@ -88,7 +114,6 @@ KA.@kernel function residual_kernel!(F, v_m, v_a,
         coef_sin = v_m[fr]*v_m[to]*ybus_im_nzval[c]
         cos_val = cos(aij)
         sin_val = sin(aij)
-        F[i] += coef_cos * cos_val + coef_sin * sin_val
         if i > npv
             F[npq + i] += coef_cos * sin_val - coef_sin * cos_val
         end
@@ -101,16 +126,26 @@ function residual_polar!(F, v_m, v_a,
     npv = length(pv)
     npq = length(pq)
     if isa(F, Array)
-        kernel! = residual_kernel!(KA.CPU())
+        kernel1! = residual_kernel1!(KA.CPU())
+        kernel2! = residual_kernel2!(KA.CPU())
     else
-        kernel! = residual_kernel!(KA.CUDADevice())
+        kernel1! = residual_kernel1!(KA.CUDADevice())
+        kernel2! = residual_kernel2!(KA.CUDADevice())
     end
-    ev = kernel!(F, v_m, v_a,
+
+    ev1 = kernel1!(F, v_m, v_a,
                  ybus_re.nzval, ybus_re.colptr, ybus_re.rowval,
                  ybus_im.nzval, ybus_im.colptr, ybus_im.rowval,
                  pinj, qinj, pv, pq, nbus,
                  ndrange=npv+npq)
-    wait(ev)
+    wait(ev1)
+
+    ev2 = kernel2!(F, v_m, v_a,
+                 ybus_re.nzval, ybus_re.colptr, ybus_re.rowval,
+                 ybus_im.nzval, ybus_im.colptr, ybus_im.rowval,
+                 pinj, qinj, pv, pq, nbus,
+                 ndrange=npv+npq)
+    wait(ev2)
 end
 
 KA.@kernel function residual_adj_kernel!(F, adj_F, v_m, adj_v_m, v_a, adj_v_a,
