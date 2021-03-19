@@ -39,11 +39,13 @@ function powerflow(
     fill!(F, zero(T))
     fill!(dx, zero(T))
 
+    println("[$iter] norm(Vm): ", xnorm(Vm), " norm(Va): ", xnorm(Va))
     # Evaluate residual function
     power_balance(polar, F, buffer)
 
     # check for convergence
-    normF = norm(F, Inf)
+    normF = xnorm(F)
+    println("[$iter] norm(F): $normF")
     if algo.verbose >= VERBOSE_LEVEL_LOW
         @printf("Iteration %d. Residual norm: %g.\n", iter, normF)
     end
@@ -66,6 +68,7 @@ function powerflow(
         @timeit TIMER "Jacobian" begin
             J = AutoDiff.jacobian!(polar, jacobian, buffer)
         end
+        println("[$iter] norm(J): ", xnorm(J.nzVal))
 
         # Find descent direction
         if isa(solver, LinearSolvers.AbstractIterativeLinearSolver)
@@ -74,20 +77,23 @@ function powerflow(
         @timeit TIMER "Linear Solver" n_iters = LinearSolvers.ldiv!(solver, dx, J, F)
         push!(linsol_iters, n_iters)
 
+        println("[$iter] norm(dx): ", xnorm(dx))
         # update voltage
         @timeit TIMER "Update voltage" begin
             # Sometimes it is better to move backward
             if (npv != 0)
                 # Va[pv] .= Va[pv] .+ dx[j5:j6]
-                Vapv .= Vapv .- dx56
+                Vapv .-= dx56
             end
             if (npq != 0)
                 # Vm[pq] .= Vm[pq] .+ dx[j1:j2]
-                Vmpq .= Vmpq .- dx12
+                Vmpq .-= dx12
                 # Va[pq] .= Va[pq] .+ dx[j3:j4]
-                Vapq .= Vapq .- dx34
+                Vapq .-= dx34
             end
         end
+        println("[$iter] norm(Vm): ", xnorm(Vm)) 
+        println("[$iter] norm(Va): ", xnorm(Va))
 
         fill!(F, zero(T))
         @timeit TIMER "Residual function" begin
@@ -95,6 +101,7 @@ function powerflow(
         end
 
         @timeit TIMER "Norm" normF = xnorm(F)
+        println("[$iter] norm(F): $normF")
         if algo.verbose >= VERBOSE_LEVEL_LOW
             @printf("Iteration %d. Residual norm: %g.\n", iter, normF)
         end

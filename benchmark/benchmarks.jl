@@ -11,8 +11,9 @@ import ExaPF: PowerSystem, LinearSolvers, AutoDiff
 ntol = 1e-6
 # For debugging in REPL use the following lines
 # empty!(ARGS)
-# push!(ARGS, "KrylovBICGSTAB")
+# push!(ARGS, "DirectSolver")
 # push!(ARGS, "CPU")
+# push!(ARGS, "CUDADevice")
 # push!(ARGS, "case300.m")
 # push!(ARGS, "caseGO30R-025.raw")
 

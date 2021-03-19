@@ -17,27 +17,35 @@ KA.@kernel function residual_kernel!(
     pinj, qinj, pv, pq, nbus
 )
 
+    i = @index(Global, Linear)
     npv = size(pv, 1)
     npq = size(pq, 1)
 
-    i = @index(Global, Linear)
     # REAL PV: 1:npv
     # REAL PQ: (npv+1:npv+npq)
     # IMAG PQ: (npv+npq+1:npv+2npq)
-    fr = (i <= npv) ? pv[i] : pq[i - npv]
-    F[i] -= pinj[fr]
-    if i > npv
-        F[i + npq] -= qinj[fr]
+    if i <= npv
+        fr = pv[i]
+    else
+        fr = pq[i-npv]
     end
-    @inbounds for c in colptr[fr]:colptr[fr+1]-1
+    F[i] = -pinj[fr]
+    if i > npv
+        F[i + npq] = -qinj[fr]
+    end
+    vafr = va[fr]
+    vmfr = vm[fr]
+    columns = colptr[fr]:colptr[fr+1]-1
+    # @inbounds for c in colptr[fr]:colptr[fr+1]-1
+    @inbounds for c in columns
         to = rowval[c]
-        aij = va[fr] - va[to]
+        aij = vafr - va[to]
         # f_re = a * cos + b * sin
         # f_im = a * sin - b * cos
-        coef_cos = vm[fr]*vm[to]*ybus_re_nzval[c]
-        coef_sin = vm[fr]*vm[to]*ybus_im_nzval[c]
-        cos_val = cos(aij)
-        sin_val = sin(aij)
+        coef_cos = vmfr*vm[to]*ybus_re_nzval[c]
+        coef_sin = vmfr*vm[to]*ybus_im_nzval[c]
+        cos_val = aij + 1.0
+        sin_val = aij
         F[i] += coef_cos * cos_val + coef_sin * sin_val
         if i > npv
             F[npq + i] += coef_cos * sin_val - coef_sin * cos_val
@@ -60,7 +68,7 @@ function residual_polar!(F, vm, va, pinj, qinj,
     if isa(F, Array)
         kernel! = residual_kernel!(KA.CPU())
     else
-        kernel! = residual_kernel!(KA.CUDADevice())
+        kernel! = residual_kernel!(KA.CUDADevice(), 256, npv+npq)
     end
     ev = kernel!(F, vm, va,
                  ybus_re.colptr, ybus_re.rowval,
@@ -241,8 +249,8 @@ function adj_residual_polar!(
     adj_va   .= 0.0
     adj_pinj .= 0.0
 
-    kernel_edge! = adj_residual_edge_kernel!(KA.CUDADevice())
-    kernel_node! = gpu_adj_node_kernel!(KA.CUDADevice())
+    kernel_edge! = adj_residual_edge_kernel!(KA.CUDADevice(), 256, npv+npq)
+    kernel_node! = gpu_adj_node_kernel!(KA.CUDADevice(), 256, nvbus)
     spedge_vm_to = CUSPARSE.CuSparseMatrixCSR{T}(colptr, rowval, edge_vm_to,(nvbus,nvbus))
     spedge_va_to = CUSPARSE.CuSparseMatrixCSR{T}(colptr, rowval, edge_va_to,(nvbus,nvbus))
     tspedge_vm_to = CUSPARSE.CuSparseMatrixCOO(spedge_vm_to)
@@ -706,14 +714,14 @@ function adj_reactive_power!(
         adj_qinj .= 0.0
     end
 
-    kernel_edge! = adj_reactive_power_edge_kernel!(KA.CUDADevice())
-    kernel_node! = gpu_adj_node_kernel!(KA.CUDADevice())
+    range_ = length(pv) + length(ref)
+
+    kernel_edge! = adj_reactive_power_edge_kernel!(KA.CUDADevice(), 256, range_)
+    kernel_node! = gpu_adj_node_kernel!(KA.CUDADevice(), 256, nvbus)
     spedge_vm_to = CUSPARSE.CuSparseMatrixCSR{T}(colptr, rowval, edge_vm_to,(nvbus,nvbus))
     spedge_va_to = CUSPARSE.CuSparseMatrixCSR{T}(colptr, rowval, edge_va_to,(nvbus,nvbus))
     tspedge_vm_to = CUSPARSE.CuSparseMatrixCOO(spedge_vm_to)
     tspedge_va_to = CUSPARSE.CuSparseMatrixCOO(spedge_va_to)
-
-    range_ = length(pv) + length(ref)
 
     ev = kernel_edge!(
         F, adj_F,

@@ -200,20 +200,46 @@ end
 
 ## Callbacks
 function update!(nlp::ReducedSpaceEvaluator, u)
-    jac_x = nlp.state_jacobian.x
-    # Transfer control u into the network cache
-    transfer!(nlp.model, nlp.buffer, u)
-    # Get corresponding point on the manifold
-    conv = powerflow(
-        nlp.model,
-        jac_x,
-        nlp.buffer,
-        nlp.powerflow_solver;
-        solver=nlp.linear_solver
-    )
+    # This is related to issue #110. 
+    # The workaround is to retry the powerflow if it fails.
+    for i in 1:nlp.powerflow_solver.retriesonfail
+        println("Retry $i")
+        try 
+            # jac_x = deepcopy(nlp.state_jacobian.Jx)
+            jac_x = nlp.state_jacobian.x
+            buffer = deepcopy(nlp.buffer)
+            println("Transfer $i")
+            # Transfer control u into the network cache
+            # nlp.buffer.dx .= 0.0
+            # nlp.buffer.pg .= 0.0
+            # nlp.buffer.qg .= 0.0
+            # nlp.buffer.vmag .= 0.0
+            # nlp.buffer.vang .= 0.0
+            # nlp.buffer.qinj .= 0.0
+            # nlp.buffer.pinj .= 0.0
+            transfer!(nlp.model, buffer, u)
+            println("Powerflow $i")
+            # Get corresponding point on the manifold
+            global conv = powerflow(
+            nlp.model,
+            jac_x,
+            buffer,
+            nlp.powerflow_solver;
+            solver=nlp.linear_solver
+            )
+            if !conv.has_converged   
+                throw(ErrorException("Powerflow has not converged"))
 
+            else
+                println("Break $i")
+                break
+            end
+        catch
+            @warn "Powerflow did not converge"
+        end
+    end
     if !conv.has_converged
-        error("Newton-Raphson algorithm failed to converge ($(conv.norm_residuals))")
+        error("Newton-Raphson algorithm failed to converge ($(conv.norm_residuals)) after $(nlp.powerflow_solver.retriesonfail) retries.")
         return conv
     end
 

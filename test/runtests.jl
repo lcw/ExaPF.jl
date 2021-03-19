@@ -11,6 +11,7 @@ using FiniteDiff
 
 import ExaPF: AutoDiff
 Random.seed!(2713)
+CUDA.device!(1)
 
 const INSTANCES_DIR = joinpath(dirname(@__FILE__), "..", "data")
 

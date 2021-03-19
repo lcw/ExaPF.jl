@@ -10,6 +10,9 @@ function _power_balance!(
     else
         kernel! = residual_kernel!(KA.CUDADevice())
     end
+    @show length(F)
+    @show npv
+    @show npq
     ev = kernel!(F, v_m, v_a,
                  ybus_re.colptr, ybus_re.rowval,
                  ybus_re.nzval, ybus_im.nzval,

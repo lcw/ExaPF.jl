@@ -18,8 +18,9 @@ struct NewtonRaphson <: AbstractNonLinearSolver
     maxiter::Int
     tol::Float64
     verbose::Int
+    retriesonfail::Int
 end
-NewtonRaphson(; maxiter=20, tol=1e-8, verbose=VERBOSE_LEVEL_NONE) = NewtonRaphson(maxiter, tol, verbose)
+NewtonRaphson(; maxiter=20, tol=1e-8, retriesonfail=100, verbose=VERBOSE_LEVEL_NONE) = NewtonRaphson(maxiter, tol, verbose, retriesonfail)
 
 """
     ConvergenceStatus
